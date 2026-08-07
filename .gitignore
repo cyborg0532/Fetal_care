@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+**/venv/
+**/.venv/
+
+# Environments
+.env
+*.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Databases & Vector DBs
+*.db
+*.sqlite3
+**/chroma_db/
+**/chroma.sqlite3
+data_manifest.json
+**/data_manifest.json
+
+# Test & cache directories
+.pytest_cache/
+.cache/
+.expo/
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Executables
+*.exe
+OllamaSetup.exe

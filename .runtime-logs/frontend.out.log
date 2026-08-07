@@ -1,0 +1,14 @@
+
+> frontend@1.0.0 web
+> expo start --web --port 8081
+
+env: load .env
+env: export EXPO_PUBLIC_AI_URL EXPO_PUBLIC_CORE_URL ppassword
+Starting project at C:\Users\Sashmit darbari\Desktop\Project TESTING\MotherCare\frontend
+Using src/app as the root directory for Expo Router.
+React Compiler enabled
+Starting Metro Bundler
+
+Waiting on http://localhost:8081
+
+Logs for your project will appear below.

@@ -1,0 +1,105 @@
+INFO:     Started server process [17316]
+INFO:     Waiting for application startup.
+INFO:	  ai_service.main - [AI Service] Starting up on port 8001 ...
+INFO:	  ai_service.services.rag - [RAG Sync] Scanning 'C:\Users\Sashmit darbari\Desktop\Project TESTING\MotherCare\Data' ...
+INFO:	  ai_service.services.rag - [RAG] ChromaDB ready at C:\Users\Sashmit darbari\Desktop\Project TESTING\MotherCare\ai_service\chroma_db (0 chunks)
+INFO:	  ai_service.services.rag - [RAG] Loading all-MiniLM-L6-v2 ...
+INFO:	  sentence_transformers.base.model - No device provided, using cpu
+INFO:	  sentence_transformers.base.model - Loading SentenceTransformer model from sentence-transformers/all-MiniLM-L6-v2.
+'[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions' thrown while requesting HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json
+WARNING:	  huggingface_hub.utils._http - '[WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions' thrown while requesting HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json
+Retrying in 1s [Retry 1/5].
+WARNING:	  huggingface_hub.utils._http - Retrying in 1s [Retry 1/5].
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\starlette\routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\fastapi\routing.py", line 233, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\Desktop\Project TESTING\MotherCare\ai_service\main.py", line 38, in lifespan
+    await loop.run_in_executor(None, sync_data_folder)
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\Desktop\Project TESTING\MotherCare\ai_service\services\rag.py", line 235, in sync_data_folder
+    _get_embedding_model()
+  File "C:\Users\Sashmit darbari\Desktop\Project TESTING\MotherCare\ai_service\services\rag.py", line 162, in _get_embedding_model
+    _embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 41, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\sentence_transformer\model.py", line 188, in __init__
+    super().__init__(
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 216, in __init__
+    modules, self.module_kwargs = self._load_modules(
+                                  ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 1002, in _load_modules
+    return self._load_config_modules(model_name_or_path, **load_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\model.py", line 1208, in _load_config_modules
+    module = module_class.load(
+             ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 2045, in load
+    return cls(model_name_or_path=model_name_or_path, **init_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\util\decorators.py", line 87, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 639, in __init__
+    config, is_peft_model = self._load_config(model_name_or_path, backend, config_kwargs)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1662, in _load_config
+    adapter_config_file = find_adapter_config_file(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\peft_utils.py", line 84, in find_adapter_config_file
+    adapter_cached_filename = cached_file(
+                              ^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\hub.py", line 293, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\hub.py", line 527, in cached_files
+    raise e
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\transformers\utils\hub.py", line 437, in cached_files
+    hf_hub_download(
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\utils\_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\file_download.py", line 1013, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\file_download.py", line 1147, in _hf_hub_download_to_cache_dir
+    _get_metadata_or_catch_error(
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\file_download.py", line 1707, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\utils\_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\file_download.py", line 1615, in get_hf_file_metadata
+    response = _httpx_follow_relative_redirects_with_backoff(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\utils\_http.py", line 719, in _httpx_follow_relative_redirects_with_backoff
+    response = http_backoff(
+               ^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\utils\_http.py", line 596, in http_backoff
+    return next(
+           ^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\huggingface_hub\utils\_http.py", line 504, in _http_backoff_base
+    response = client.request(method=method, url=url, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\httpx\_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Sashmit darbari\AppData\Local\Programs\Python\Python312\Lib\site-packages\httpx\_client.py", line 901, in send
+    raise RuntimeError("Cannot send a request, as the client has been closed.")
+RuntimeError: Cannot send a request, as the client has been closed.
+
+ERROR:    Application startup failed. Exiting.

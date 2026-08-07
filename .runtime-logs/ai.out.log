@@ -1,0 +1,2 @@
+INFO:     127.0.0.1:63375 - "GET /api/v1/chat/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63379 - "POST /api/v1/chat/father HTTP/1.1" 200 OK

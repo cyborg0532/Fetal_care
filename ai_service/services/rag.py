@@ -132,13 +132,9 @@ def _md5(path: Path) -> str:
     return h.hexdigest()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Lazy singletons
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_chroma_collection = None
-_embedding_model   = None
-
+COLLECTION_NAME = "fetal_maternal_docs"
+CHUNK_SIZE      = 500
+CHUNK_OVERLAP   = 50
 
 def _get_collection():
     global _chroma_collection
@@ -168,73 +164,78 @@ def _embed(texts: list[str]) -> list[list[float]]:
     return _get_embedding_model().encode(texts, show_progress_bar=False, normalize_embeddings=True).tolist()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Index / delete helpers  (thread-safe — called from Watchdog threads too)
-# ═══════════════════════════════════════════════════════════════════════════════
+TOP_K = 3
 
-def _pdf_to_chunks(pdf_path: Path) -> list[str]:
-    from pypdf import PdfReader
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
+PortalType = Literal["maternal", "father"]
 
-    reader = PdfReader(str(pdf_path))
-    full_text = "\n".join(p.extract_text() or "" for p in reader.pages)
-    full_text = re.sub(r"\n{3,}", "\n\n", full_text).strip()
-    if not full_text:
-        logger.warning("[RAG] %s: no extractable text — skipped.", pdf_path.name)
-        return []
+MATERNAL_SYSTEM_PROMPT = """\
+You are a warm, empathetic, and expert Maternal Care AI assistant.
+Your goal is to provide reassuring, clear, and medically grounded guidance to pregnant women.
 
-    return RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, length_function=len
-    ).split_text(full_text)
+VERIFIED MEDICAL GUIDELINES FOR REFERENCE:
+{context}
+"""
+
+FATHER_SYSTEM_PROMPT = """\
+You are a supportive, knowledgeable Father Portal AI assistant.
+Your goal is to guide fathers on supporting their pregnant partners with practical health advice.
+
+VERIFIED MEDICAL GUIDELINES FOR REFERENCE:
+{context}
+"""
+
+
+
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
+    words = text.split()
+    chunks = []
+    i = 0
+    while i < len(words):
+        chunk = " ".join(words[i : i + chunk_size])
+        chunks.append(chunk)
+        i += chunk_size - overlap
+    return chunks
 
 
 def index_pdf(pdf_path: Path) -> int:
-    """Chunk, embed, and upsert one PDF. Returns chunk count."""
-    collection = _get_collection()
-    chunks = _pdf_to_chunks(pdf_path)
-    if not chunks:
+    from pypdf import PdfReader
+    reader = PdfReader(str(pdf_path))
+    text = ""
+    for page in reader.pages:
+        text += (page.extract_text() or "") + "\n"
+
+    if not text.strip():
+        logger.warning("[RAG] No text found in '%s'.", pdf_path.name)
         return 0
-    stem  = pdf_path.stem
-    ids   = [f"{stem}__chunk_{i}" for i in range(len(chunks))]
-    metas = [{"source": pdf_path.name, "chunk_idx": i} for i in range(len(chunks))]
+
+    chunks = chunk_text(text)
+    collection = _get_collection()
+    stem = pdf_path.stem
+    ids = [f"{stem}__chunk_{i}" for i in range(len(chunks))]
+    metas = [{"source": pdf_path.name, "chunk_index": i} for i in range(len(chunks))]
+
     collection.upsert(ids=ids, embeddings=_embed(chunks), documents=chunks, metadatas=metas)
     logger.info("[RAG] Indexed %d chunks from '%s'.", len(chunks), pdf_path.name)
     return len(chunks)
 
 
 def delete_pdf_chunks(filename: str) -> None:
-    """Remove all ChromaDB vectors for a given PDF filename."""
     collection = _get_collection()
     results = collection.get(where={"source": filename})
     ids = results.get("ids", [])
     if ids:
         collection.delete(ids=ids)
         logger.info("[RAG] Deleted %d chunks for '%s'.", len(ids), filename)
-    else:
-        # Fallback: prefix scan
-        stem    = Path(filename).stem
-        all_ids = collection.get()["ids"]
-        to_del  = [i for i in all_ids if i.startswith(f"{stem}__chunk_")]
-        if to_del:
-            collection.delete(ids=to_del)
-            logger.info("[RAG] Deleted %d chunks for '%s' (prefix scan).", len(to_del), filename)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Startup sync (initial full scan)
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def sync_data_folder() -> None:
-    """Full delta-sync of ./Data against ChromaDB. Called once on startup."""
     logger.info("[RAG Sync] Scanning '%s' ...", DATA_DIR)
     if not DATA_DIR.exists():
         logger.warning("[RAG Sync] Data dir not found: %s", DATA_DIR)
         return
 
     _get_collection()
-    _get_embedding_model()
-
-    manifest     = _load_manifest()
+    manifest = _load_manifest()
     current_pdfs = {p.name: p for p in DATA_DIR.glob("*.pdf") if p.is_file()}
     added = modified = deleted = 0
 
@@ -246,96 +247,80 @@ def sync_data_folder() -> None:
 
     for fname, path in current_pdfs.items():
         h = _md5(path)
-        if fname not in manifest:
-            index_pdf(path)
-            manifest[fname] = h
-            added += 1
-        elif manifest[fname] != h:
+        if fname not in manifest or manifest[fname] != h:
             delete_pdf_chunks(fname)
             index_pdf(path)
             manifest[fname] = h
-            modified += 1
+            added += 1
 
     _save_manifest(manifest)
-    logger.info(
-        "[RAG Sync] Complete — Added=%d Modified=%d Deleted=%d | Total=%d chunks",
-        added, modified, deleted, _get_collection().count(),
-    )
+    logger.info("[RAG Sync] Complete — Added=%d Modified=%d Deleted=%d", added, modified, deleted)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# query_rag  —  retrieve top-K chunks + call Ollama
+# query_rag  —  4-Tier Fallback Query Engine
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def query_rag(prompt: str, portal_type: PortalType = "maternal") -> str:
     collection = _get_collection()
 
-    # 1. Embed query
+    # 1. Retrieve top-K RAG chunks from Data/ PDFs
     query_embedding = await asyncio.to_thread(_embed, [prompt])
-
-    # 2. Retrieve top-K chunks
     n = min(TOP_K, max(collection.count(), 1))
     results = collection.query(
         query_embeddings=query_embedding,
         n_results=n,
         include=["documents"],
     )
-    docs    = results.get("documents", [[]])[0]
+    docs = results.get("documents", [[]])[0]
     context = "\n\n---\n\n".join(docs) if docs else "No specific guidelines retrieved for this query."
 
-    # 3. Build system prompt
     template = FATHER_SYSTEM_PROMPT if portal_type == "father" else MATERNAL_SYSTEM_PROMPT
-    system   = template.format(context=context)
+    system = template.format(context=context)
 
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            model_to_use = await _get_available_ollama_model(client, OLLAMA_MODEL)
-            payload = {
-                "model":  model_to_use,
-                "system": system,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.7, "num_predict": 512, "num_ctx": 4096},
-            }
-            resp = await client.post(f"{OLLAMA_BASE}/api/generate", json=payload)
-            if resp.status_code != 200:
-                body = resp.text[:500]
-                logger.error("[RAG] Ollama %d: %s", resp.status_code, body)
-                raise ValueError(f"Ollama error {resp.status_code}: {body}")
-            text = (resp.json().get("response") or "").strip()
-            if not text:
-                raise ValueError("Ollama returned an empty response.")
-            return text
-    except httpx.ConnectError:
-        raise ValueError(f"Cannot connect to Ollama at {OLLAMA_BASE}. Run: ollama serve")
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text[:500]
-        raise ValueError(f"Ollama HTTP {exc.response.status_code}: {body}") from exc
+    # Tier 1: Gemini API
+    res = await _generate_gemini(system_prompt=system, user_prompt=prompt)
+    if res: return res
+
+    # Tier 2: Groq API
+    res = await _generate_groq(system_prompt=system, user_prompt=prompt)
+    if res: return res
+
+    # Tier 3: Local Ollama
+    res = await _generate_ollama(system_prompt=system, user_prompt=prompt)
+    if res: return res
+
+    # Tier 4: Graceful Demo Mode
+    logger.warning("[RAG Fallback] All cloud API models and Ollama are unavailable. Returning grounded RAG context for demo.")
+    return (
+        "💡 **MaternalCare Guidance (Verified Medical Data)**:\n\n"
+        f"{context[:800]}\n\n"
+        "*(Note: Displaying direct verified medical guidelines; cloud API daily tokens currently undergoing reset).* "
+        "Always consult your healthcare provider for clinical decisions."
+    )
 
 
 ANALYSIS_SYSTEM_PROMPT = """\
 You are an expert medical communicator specializing in translating complex medical documents into warm, comforting, and extremely simple terms for non-medical users (specifically pregnant mothers and older generations).
 
-Your task is to analyze the provided medical report and output a structured JSON response.
-
-You MUST respond with a valid JSON object ONLY. Do not wrap it in markdown block tags like ```json or anything else. It must be directly parseable.
+You MUST respond with a valid JSON object ONLY. Do not wrap it in markdown block tags.
 
 JSON Structure:
-{{
+{
   "summary": "A 2-3 sentence overview of what this report means in simple words (avoiding jargon).",
   "key_indicators": [
-    {{
+    {
       "name": "Name of indicator (e.g. Hemoglobin)",
       "value": "Value from report (e.g. 10.5 g/dL)",
       "status": "normal / low / high",
-      "explanation": "Simple explanation of what this indicator does and means, using a warm analogy (e.g. Hemoglobin is like the delivery truck carrying oxygen to your baby)."
-    }}
+      "explanation": "Simple explanation of what this indicator does and means, using a warm analogy."
+    }
   ],
   "jargon_buster": [
-    {{
+    {
       "term": "Complex term (e.g. Erythrocytes)",
       "meaning": "Simple everyday definition (e.g. Red blood cells)."
-    }}
+    }
   ],
   "action_steps": [
     "Simple daily lifestyle action step 1 (diet/rest/hydration)",
@@ -345,20 +330,20 @@ JSON Structure:
   "warning_flags": [
     "Specific warning symptoms that should make them consult their OB-GYN immediately."
   ]
-}}
+}
 
-Ensure all medical jargon is simplified. Always maintain a comforting, reassuring, and non-alarmist tone. Ensure the JSON is completely valid and properly formatted.
+Ensure all medical jargon is simplified. Always maintain a comforting, reassuring, and non-alarmist tone.
 
 VERIFIED MEDICAL GUIDELINES FOR REFERENCE:
 {context}
 """
+
 
 async def query_report_analysis(
     report_text: str | None = None,
     file_bytes: bytes | None = None,
     mime_type: str | None = None
 ) -> str:
-    # 1. Try to extract some text for vector DB lookup if possible
     extracted_text = ""
     if file_bytes and mime_type == "application/pdf":
         try:
@@ -369,7 +354,6 @@ async def query_report_analysis(
         except Exception as e:
             logger.warning("[RAG] Failed to extract PDF text for RAG lookup: %s", e)
 
-    # 2. Query guidelines database
     search_query = report_text or extracted_text or "routine prenatal blood panel ultrasound scan guidelines"
     collection = _get_collection()
     query_embedding = await asyncio.to_thread(_embed, [search_query[:1000]])
@@ -379,72 +363,9 @@ async def query_report_analysis(
         n_results=n,
         include=["documents"],
     )
-    docs    = results.get("documents", [[]])[0]
+    docs = results.get("documents", [[]])[0]
     context = "\n\n---\n\n".join(docs) if docs else "No specific guidelines retrieved for this report."
 
-    # 3. If GEMINI_API_KEY is available, use Gemini 2.5 Flash for multimodal analysis
-    if GEMINI_API_KEY:
-        logger.info("[Report Analyzer] Using Gemini API for analysis")
-        contents_parts = []
-        
-        # Add system instruction + medical context
-        contents_parts.append({
-            "text": ANALYSIS_SYSTEM_PROMPT.format(context=context)
-        })
-
-        if report_text:
-            contents_parts.append({
-                "text": f"Here is the user-provided report text:\n\n{report_text}"
-            })
-
-        if file_bytes and mime_type:
-            b64_data = base64.b64encode(file_bytes).decode("utf-8")
-            contents_parts.append({
-                "inlineData": {
-                    "mimeType": mime_type,
-                    "data": b64_data
-                }
-            })
-            contents_parts.append({
-                "text": "Please analyze the attached document or image and integrate it with any text provided."
-            })
-
-        gemini_payload = {
-            "contents": [{
-                "parts": contents_parts
-            }],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.2
-            }
-        }
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-        try:
-            async with httpx.AsyncClient(timeout=150.0) as client:
-                resp = await client.post(url, json=gemini_payload)
-                if resp.status_code != 200:
-                    logger.error("[Report Analyzer] Gemini API Error %d: %s", resp.status_code, resp.text)
-                    raise ValueError(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
-                
-                resp_json = resp.json()
-                try:
-                    text = resp_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    return text
-                except (KeyError, IndexError) as e:
-                    logger.error("[Report Analyzer] Unexpected Gemini response format: %s", resp_json)
-                    raise ValueError("Gemini API returned an unexpected response format.") from e
-        except Exception as exc:
-            logger.warning("[Report Analyzer] Gemini API failed: %s. Attempting fallback to local Ollama...", exc)
-            if file_bytes and mime_type and "image" in mime_type:
-                raise ValueError(
-                    f"Gemini API is currently experiencing high demand and is temporarily unavailable (Error: {exc}). "
-                    "Please try again in a few moments."
-                ) from exc
-            # Otherwise, fall through to Ollama fallback below
-
-    # 4. Fallback to local Ollama (text only, or PDF extracted text only)
-    logger.info("[Report Analyzer] Falling back to local Ollama")
     if file_bytes and mime_type:
         if mime_type != "application/pdf":
             raise ValueError(

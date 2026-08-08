@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, ActivityIndicator, RefreshControl, Image, Linking, Platform, useWindowDimensions
@@ -23,6 +23,22 @@ const STATUS_FILTERS = [
   { id: 'flagged', label: 'Flagged' },
 ];
 
+const CATEGORIES = [
+  'Ultrasound Scan',
+  'Blood Test',
+  'PCOS Assessment',
+  'Prescription',
+  'Clinical Note',
+  'Authority Log',
+  'General',
+];
+
+const RISK_LEVELS = [
+  'Low Risk',
+  'Moderate Risk',
+  'High Risk',
+];
+
 const SAMPLE_EVIDENCE_PRESETS = [
   { name: 'Ultrasound_20W_Scan.jpg', type: 'image', url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?w=800&auto=format&fit=crop&q=80' },
   { name: 'CBC_Blood_Panel_Report.pdf', type: 'pdf', url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' },
@@ -33,6 +49,9 @@ const SAMPLE_EVIDENCE_PRESETS = [
 export default function HealthReportsScreen() {
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activePickerTargetRef = useRef<'new' | 'attach'>('new');
 
   const [activeRole, setActiveRole] = useState<string>('user');
   const [activeStatus, setActiveStatus] = useState<string>('all');
@@ -45,12 +64,26 @@ export default function HealthReportsScreen() {
   const [detailModalVisible, setDetailModalVisible] = useState<boolean>(false);
   const [attachModalVisible, setAttachModalVisible] = useState<boolean>(false);
   const [exportModalVisible, setExportModalVisible] = useState<boolean>(false);
+  const [addModalVisible, setAddModalVisible] = useState<boolean>(false);
 
   // Attachment Form
   const [attachUrl, setAttachUrl] = useState<string>('');
   const [attachName, setAttachName] = useState<string>('');
   const [attachType, setAttachType] = useState<string>('image');
   const [attaching, setAttaching] = useState<boolean>(false);
+
+  // Add New Record Form
+  const [newTitle, setNewTitle] = useState<string>('');
+  const [newCategory, setNewCategory] = useState<string>('Ultrasound Scan');
+  const [newGestationalWeek, setNewGestationalWeek] = useState<string>('24');
+  const [newRiskLevel, setNewRiskLevel] = useState<string>('Low Risk');
+  const [newDescription, setNewDescription] = useState<string>('');
+  const [newDoctorNotes, setNewDoctorNotes] = useState<string>('');
+  const [newRoleVisibility, setNewRoleVisibility] = useState<'user' | 'hospital' | 'investigator' | 'admin'>('user');
+  const [newAttachmentUrl, setNewAttachmentUrl] = useState<string>('');
+  const [newAttachmentName, setNewAttachmentName] = useState<string>('');
+  const [newAttachmentType, setNewAttachmentType] = useState<string>('image');
+  const [creatingRecord, setCreatingRecord] = useState<boolean>(false);
 
   const fetchRecords = useCallback(async () => {
     try {
@@ -68,6 +101,61 @@ export default function HealthReportsScreen() {
     setLoading(true);
     fetchRecords();
   }, [fetchRecords]);
+
+  // File Picker Handler (PDF & Image support)
+  const handlePickDocument = async (target: 'new' | 'attach') => {
+    activePickerTargetRef.current = target;
+    if (Platform.OS === 'web') {
+      if (fileInputRef.current) {
+        fileInputRef.current.onchange = (e: any) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              const isPdf = file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
+              const fileType = isPdf ? 'pdf' : (file.type.includes('image') ? 'image' : 'document');
+              if (activePickerTargetRef.current === 'new') {
+                setNewAttachmentUrl(result);
+                setNewAttachmentName(file.name);
+                setNewAttachmentType(fileType);
+              } else {
+                setAttachUrl(result);
+                setAttachName(file.name);
+                setAttachType(fileType);
+              }
+            };
+            reader.readAsDataURL(file);
+          }
+        };
+        fileInputRef.current.click();
+      }
+    } else {
+      try {
+        const DocumentPicker = require('expo-document-picker');
+        const res = await DocumentPicker.getDocumentAsync({
+          type: ['application/pdf', 'image/*'],
+          copyToCacheDirectory: true,
+        });
+        if (!res.canceled && res.assets && res.assets.length > 0) {
+          const asset = res.assets[0];
+          const isPdf = asset.mimeType?.includes('pdf') || asset.name.toLowerCase().endsWith('.pdf');
+          const fileType = isPdf ? 'pdf' : (asset.mimeType?.includes('image') ? 'image' : 'document');
+          if (target === 'new') {
+            setNewAttachmentUrl(asset.uri);
+            setNewAttachmentName(asset.name);
+            setNewAttachmentType(fileType);
+          } else {
+            setAttachUrl(asset.uri);
+            setAttachName(asset.name);
+            setAttachType(fileType);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to pick document:', err);
+      }
+    }
+  };
 
   const handleOpenDetail = (record: HealthRecordItem) => {
     setSelectedRecord(record);
@@ -107,6 +195,45 @@ export default function HealthReportsScreen() {
     }
   };
 
+  const handleCreateRecord = async () => {
+    if (!newTitle.trim()) {
+      alert('Please enter a report title.');
+      return;
+    }
+    setCreatingRecord(true);
+    try {
+      await HealthRecordService.createRecord({
+        title: newTitle.trim(),
+        category: newCategory,
+        gestational_week: parseInt(newGestationalWeek, 10) || 24,
+        risk_level: newRiskLevel,
+        description: newDescription.trim() || 'Patient uploaded medical report.',
+        doctor_notes: newDoctorNotes.trim() || undefined,
+        role_visibility: newRoleVisibility,
+        status: 'verified',
+        attachment_url: newAttachmentUrl.trim() || undefined,
+        attachment_name: newAttachmentName.trim() || (newAttachmentUrl ? 'Uploaded_Report' : undefined),
+        attachment_type: newAttachmentType || undefined,
+      });
+
+      setAddModalVisible(false);
+      // Reset Form
+      setNewTitle('');
+      setNewDescription('');
+      setNewDoctorNotes('');
+      setNewAttachmentUrl('');
+      setNewAttachmentName('');
+      setNewAttachmentType('image');
+
+      fetchRecords();
+    } catch (err) {
+      console.error('Failed to create health record:', err);
+      alert('Failed to save health report. Please try again.');
+    } finally {
+      setCreatingRecord(false);
+    }
+  };
+
   const handleTriggerExport = (format: 'html' | 'pdf' | 'csv') => {
     if (!selectedRecord) return;
     const exportUrl = HealthRecordService.getExportUrl(selectedRecord.id, format);
@@ -129,6 +256,16 @@ export default function HealthReportsScreen() {
 
   return (
     <DashboardLayout title="Health Reports">
+      {/* Hidden file input for Web platform */}
+      {Platform.OS === 'web' && (
+        <input
+          type="file"
+          ref={fileInputRef as any}
+          style={{ display: 'none' }}
+          accept="image/*,application/pdf"
+        />
+      )}
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.inner}
@@ -139,16 +276,16 @@ export default function HealthReportsScreen() {
         <View style={styles.pageHeader}>
           <View style={styles.headerTitleRow}>
             <Text style={styles.pageTitle}>📈 Health Records & Reports</Text>
-            <View style={styles.liveBadge}>
-              <Text style={styles.liveBadgeText}>LIVE DEMO</Text>
-            </View>
+            <TouchableOpacity style={styles.addRecordHeaderBtn} onPress={() => setAddModalVisible(true)}>
+              <Text style={styles.addRecordHeaderBtnText}>+ Add Health Report</Text>
+            </TouchableOpacity>
           </View>
           <Text style={styles.pageSub}>
-            Role-aware medical archives, supporting evidence attachments, and multi-format report exports (PDF/CSV/HTML).
+            Upload PDF/Image medical reports, manage role-aware archives, and export reports in multiple formats.
           </Text>
         </View>
 
-        {/* ── Task 2: Role-Aware Filter Tabs ──────────────────────────────────── */}
+        {/* ── Role-Aware Filter Tabs ──────────────────────────────────── */}
         <GlassCard accent={Colors.lavender}>
           <SectionHeader title="Role Viewpoint Selector" icon="🔐" action="Role Scope" />
           <Text style={styles.roleHint}>
@@ -203,7 +340,12 @@ export default function HealthReportsScreen() {
         {/* ── Health Records List ───────────────────────────────────────────── */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>📋 Scoped Medical Records</Text>
-          {loading && <ActivityIndicator size="small" color={Colors.primary} />}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+            {loading && <ActivityIndicator size="small" color={Colors.primary} />}
+            <TouchableOpacity style={styles.addRecordSmallBtn} onPress={() => setAddModalVisible(true)}>
+              <Text style={styles.addRecordSmallBtnText}>+ Add New</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {data?.records && data.records.length > 0 ? (
@@ -236,7 +378,7 @@ export default function HealthReportsScreen() {
                   <Text style={styles.riskText}>⚠️ {rec.risk_level || 'Low Risk'}</Text>
                 </View>
 
-                {/* ── Task 1: Attachment Indicator Bar ──────────────────────────────── */}
+                {/* Attachment Indicator Bar */}
                 <View style={styles.attachmentBar}>
                   {hasAttachment ? (
                     <TouchableOpacity style={styles.attachmentPill} onPress={() => handleOpenDetail(rec)}>
@@ -246,11 +388,11 @@ export default function HealthReportsScreen() {
                       <Text style={styles.attachmentPillName} numberOfLines={1}>
                         {rec.attachment_name || 'Attached Evidence'}
                       </Text>
-                      <Text style={styles.attachmentViewBtn}>View Evidence ›</Text>
+                      <Text style={styles.attachmentViewBtn}>View Report ›</Text>
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity style={styles.noAttachmentBtn} onPress={() => handleOpenAttach(rec)}>
-                      <Text style={styles.noAttachmentText}>+ Attach Evidence Scan / PDF</Text>
+                      <Text style={styles.noAttachmentText}>+ Attach PDF or Image File</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -262,7 +404,7 @@ export default function HealthReportsScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.actionBtnSecondary} onPress={() => handleOpenAttach(rec)}>
-                    <Text style={styles.actionBtnTextSecondary}>📎 {hasAttachment ? 'Edit Evidence' : 'Attach File'}</Text>
+                    <Text style={styles.actionBtnTextSecondary}>📎 {hasAttachment ? 'Edit Attachment' : 'Attach File'}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.actionBtnPrimary} onPress={() => handleOpenExport(rec)}>
@@ -280,6 +422,9 @@ export default function HealthReportsScreen() {
               <Text style={styles.emptySub}>
                 There are no health records visible for the <Text style={{ fontWeight: '700' }}>{activeRole}</Text> role under the selected status filter.
               </Text>
+              <TouchableOpacity style={styles.addRecordHeaderBtn} onPress={() => setAddModalVisible(true)}>
+                <Text style={styles.addRecordHeaderBtnText}>+ Add First Health Report</Text>
+              </TouchableOpacity>
             </View>
           </GlassCard>
         )}
@@ -287,7 +432,170 @@ export default function HealthReportsScreen() {
         <View style={{ height: Spacing.xxl }} />
       </ScrollView>
 
-      {/* ── DETAIL MODAL (Task 1 & Task 3 Evidence Display) ───────────────────── */}
+      {/* ── ADD NEW HEALTH REPORT MODAL ────────────────────────────────────── */}
+      <Modal visible={addModalVisible} transparent animationType="slide" onRequestClose={() => setAddModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>📄 Add New Health Report</Text>
+                <Text style={styles.exportSub}>Upload a PDF / Image report or record clinical findings</Text>
+              </View>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setAddModalVisible(false)}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+              <Text style={styles.inputLabel}>REPORT TITLE *</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. CBC Blood Panel / 20-Week Scan"
+                placeholderTextColor={Colors.textMuted}
+                value={newTitle}
+                onChangeText={setNewTitle}
+              />
+
+              <Text style={styles.inputLabel}>REPORT CATEGORY</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginVertical: 4 }}>
+                {CATEGORIES.map(cat => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[styles.chipSelect, newCategory === cat && styles.chipSelectActive]}
+                    onPress={() => setNewCategory(cat)}
+                  >
+                    <Text style={[styles.chipSelectText, newCategory === cat && styles.chipSelectTextActive]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <View style={{ flexDirection: 'row', gap: Spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputLabel}>GESTATIONAL WEEK</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="24"
+                    keyboardType="number-pad"
+                    placeholderTextColor={Colors.textMuted}
+                    value={newGestationalWeek}
+                    onChangeText={setNewGestationalWeek}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputLabel}>RISK CLASSIFICATION</Text>
+                  <View style={{ flexDirection: 'row', gap: 4, marginTop: 4 }}>
+                    {RISK_LEVELS.map(rl => (
+                      <TouchableOpacity
+                        key={rl}
+                        style={[styles.miniChip, newRiskLevel === rl && styles.miniChipActive]}
+                        onPress={() => setNewRiskLevel(rl)}
+                      >
+                        <Text style={[styles.miniChipText, newRiskLevel === rl && styles.miniChipTextActive]}>{rl.replace(' Risk', '')}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              <Text style={styles.inputLabel}>REPORT SUMMARY / DESCRIPTION</Text>
+              <TextInput
+                style={[styles.textInput, { height: 70 }]}
+                multiline
+                placeholder="Describe key findings, diagnosis, or report notes..."
+                placeholderTextColor={Colors.textMuted}
+                value={newDescription}
+                onChangeText={setNewDescription}
+              />
+
+              <Text style={styles.inputLabel}>DOCTOR CLINICAL NOTES (OPTIONAL)</Text>
+              <TextInput
+                style={[styles.textInput, { height: 60 }]}
+                multiline
+                placeholder="Clinical observations or prescribed instructions..."
+                placeholderTextColor={Colors.textMuted}
+                value={newDoctorNotes}
+                onChangeText={setNewDoctorNotes}
+              />
+
+              {/* ── UPLOAD PDF OR IMAGE ATTACHMENT SECTION ───────────────────── */}
+              <View style={styles.uploadSectionBox}>
+                <Text style={styles.modalSectionTitle}>📷 / 📄 Attach Report File (PDF or Image)</Text>
+                
+                <TouchableOpacity style={styles.pickFileBtn} onPress={() => handlePickDocument('new')}>
+                  <Text style={styles.pickFileBtnText}>
+                    {newAttachmentName ? `📎 Change File (${newAttachmentName})` : '📁 Pick PDF or Image File'}
+                  </Text>
+                </TouchableOpacity>
+
+                {newAttachmentUrl ? (
+                  <View style={styles.fileSelectedBox}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ fontSize: 22 }}>{newAttachmentType === 'pdf' ? '📄' : '🖼️'}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.fileNameText} numberOfLines={1}>{newAttachmentName || 'Attached_Report'}</Text>
+                        <Text style={styles.fileTypeText}>{newAttachmentType.toUpperCase()} File attached</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => { setNewAttachmentUrl(''); setNewAttachmentName(''); }}>
+                        <Text style={{ color: Colors.danger, fontWeight: '700' }}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {newAttachmentType === 'image' && newAttachmentUrl.startsWith('data:image') && (
+                      <Image source={{ uri: newAttachmentUrl }} style={{ width: '100%', height: 140, borderRadius: 8, marginTop: 8 }} resizeMode="cover" />
+                    )}
+                  </View>
+                ) : (
+                  <Text style={styles.orText}>- OR enter URL / Choose sample below -</Text>
+                )}
+
+                <Text style={styles.inputLabel}>OR ATTACHMENT FILE URL / URI</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="https://example.com/report.pdf or file uri"
+                  placeholderTextColor={Colors.textMuted}
+                  value={newAttachmentUrl}
+                  onChangeText={(val) => {
+                    setNewAttachmentUrl(val);
+                    if (val.includes('.pdf')) setNewAttachmentType('pdf');
+                  }}
+                  autoCapitalize="none"
+                />
+
+                {/* Presets */}
+                <Text style={[styles.inputLabel, { marginTop: 8 }]}>✨ SAMPLE REPORT PRESETS</Text>
+                <View style={styles.presetGroup}>
+                  {SAMPLE_EVIDENCE_PRESETS.map((p, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.presetChip}
+                      onPress={() => {
+                        setNewAttachmentUrl(p.url);
+                        setNewAttachmentName(p.name);
+                        setNewAttachmentType(p.type);
+                      }}
+                    >
+                      <Text style={styles.presetChipText}>{p.type === 'image' ? '🖼️' : '📄'} {p.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity style={styles.saveAttachBtn} onPress={handleCreateRecord} disabled={creatingRecord}>
+                {creatingRecord ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveAttachBtnText}>Save & Create Health Record</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── DETAIL MODAL ──────────────────────────────────────────────────── */}
       {selectedRecord && (
         <Modal visible={detailModalVisible} transparent animationType="slide" onRequestClose={() => setDetailModalVisible(false)}>
           <View style={styles.modalOverlay}>
@@ -344,7 +652,7 @@ export default function HealthReportsScreen() {
                   </View>
                 )}
 
-                {/* ── Task 1: Attached Supporting Evidence Display ───────────────── */}
+                {/* Attached Supporting Evidence Display */}
                 <View style={styles.evidenceSection}>
                   <Text style={styles.modalSectionTitle}>📷 Supporting Evidence & Attachment</Text>
                   {selectedRecord.attachment_url ? (
@@ -396,13 +704,13 @@ export default function HealthReportsScreen() {
         </Modal>
       )}
 
-      {/* ── ATTACHMENT MODAL (Task 1 Input) ─────────────────────────────────── */}
+      {/* ── ATTACHMENT MODAL FOR EXISTING RECORDS ───────────────────────────── */}
       {selectedRecord && (
         <Modal visible={attachModalVisible} transparent animationType="slide" onRequestClose={() => setAttachModalVisible(false)}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalCard, { maxHeight: '80%' }]}>
+            <View style={[styles.modalCard, { maxHeight: '85%' }]}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>📎 Attach Supporting Evidence</Text>
+                <Text style={styles.modalTitle}>📎 Attach PDF or Image File</Text>
                 <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setAttachModalVisible(false)}>
                   <Text style={styles.modalCloseText}>✕</Text>
                 </TouchableOpacity>
@@ -411,6 +719,13 @@ export default function HealthReportsScreen() {
               <ScrollView style={styles.modalScroll}>
                 <Text style={styles.inputLabel}>RECORD</Text>
                 <Text style={styles.readOnlyTitle}>{selectedRecord.title}</Text>
+
+                {/* PICK LOCAL FILE BUTTON */}
+                <TouchableOpacity style={styles.pickFileBtn} onPress={() => handlePickDocument('attach')}>
+                  <Text style={styles.pickFileBtnText}>
+                    {attachName ? `📎 Change File (${attachName})` : '📁 Pick PDF or Image File'}
+                  </Text>
+                </TouchableOpacity>
 
                 <Text style={styles.inputLabel}>FILE OR IMAGE URL / URI</Text>
                 <TextInput
@@ -446,7 +761,7 @@ export default function HealthReportsScreen() {
                   ))}
                 </View>
 
-                {/* Preset Evidence Samples for Fast Testing */}
+                {/* Preset Evidence Samples */}
                 <Text style={[styles.inputLabel, { marginTop: Spacing.md }]}>✨ QUICK SAMPLE PRESETS</Text>
                 <View style={styles.presetGroup}>
                   {SAMPLE_EVIDENCE_PRESETS.map((p, i) => (
@@ -479,7 +794,7 @@ export default function HealthReportsScreen() {
         </Modal>
       )}
 
-      {/* ── EXPORT MODAL (Task 3 Report Export Engine) ───────────────────────── */}
+      {/* ── EXPORT MODAL ───────────────────────────────────────────────────── */}
       {selectedRecord && (
         <Modal visible={exportModalVisible} transparent animationType="fade" onRequestClose={() => setExportModalVisible(false)}>
           <View style={styles.modalOverlay}>
@@ -540,11 +855,28 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   inner: { padding: Spacing.md },
   pageHeader: { marginBottom: Spacing.md, marginTop: Spacing.xs },
-  headerTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   pageTitle: { ...Typography.h2, color: Colors.textPrimary, fontWeight: '800' as const },
   pageSub: { ...Typography.caption, color: Colors.textMuted, marginTop: 4, lineHeight: 18 },
-  liveBadge: { backgroundColor: Colors.mint, borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
-  liveBadgeText: { ...Typography.micro, color: '#fff', fontWeight: '800' as const },
+
+  addRecordHeaderBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.full,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    ...Shadows.xs,
+  },
+  addRecordHeaderBtnText: { ...Typography.captionBold, color: '#fff' },
+
+  addRecordSmallBtn: {
+    backgroundColor: Colors.lavenderBg,
+    borderRadius: Radius.full,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: Colors.lavenderLight,
+  },
+  addRecordSmallBtnText: { ...Typography.captionBold, color: Colors.lavender },
 
   roleHint: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.sm },
   roleGrid: { flexDirection: 'row', flexWrap: 'wrap' as const, gap: 8, marginBottom: Spacing.sm },
@@ -702,7 +1034,7 @@ const styles = StyleSheet.create({
   modalExportBtn: { backgroundColor: Colors.primary, borderRadius: Radius.full, paddingVertical: 12, alignItems: 'center', ...Shadows.sm },
   modalExportBtnText: { ...Typography.bodyBold, color: '#fff' },
 
-  // Attach Input Modal
+  // Add / Attach Form Inputs
   inputLabel: { ...Typography.micro, color: Colors.textMuted, marginTop: Spacing.sm, marginBottom: 4, fontWeight: '700' as const },
   readOnlyTitle: { ...Typography.bodyBold, color: Colors.textPrimary, marginBottom: Spacing.xs },
   textInput: { backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, padding: Spacing.md, borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary, ...Typography.body },
@@ -711,6 +1043,24 @@ const styles = StyleSheet.create({
   typeBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   typeBtnText: { ...Typography.caption, color: Colors.textSecondary },
   typeBtnTextActive: { color: '#fff', fontWeight: '700' as const },
+
+  chipSelect: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: Radius.full, backgroundColor: Colors.surfaceSecondary, borderWidth: 1, borderColor: Colors.border },
+  chipSelectActive: { backgroundColor: Colors.lavenderBg, borderColor: Colors.lavender },
+  chipSelectText: { ...Typography.caption, color: Colors.textSecondary },
+  chipSelectTextActive: { color: Colors.lavender, fontWeight: '700' as const },
+
+  miniChip: { flex: 1, paddingVertical: 6, borderRadius: Radius.sm, backgroundColor: Colors.surfaceSecondary, alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
+  miniChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  miniChipText: { ...Typography.micro, color: Colors.textSecondary },
+  miniChipTextActive: { color: '#fff', fontWeight: '700' as const },
+
+  uploadSectionBox: { backgroundColor: Colors.surfaceSecondary, borderRadius: Radius.md, padding: Spacing.md, marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.border },
+  pickFileBtn: { backgroundColor: Colors.lavenderBg, borderRadius: Radius.md, padding: Spacing.md, alignItems: 'center', borderWidth: 1.5, borderColor: Colors.lavender, borderStyle: 'dashed' as const },
+  pickFileBtnText: { ...Typography.bodyBold, color: Colors.lavender },
+  fileSelectedBox: { backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.sm, marginTop: Spacing.xs, borderWidth: 1, borderColor: Colors.border },
+  fileNameText: { ...Typography.captionBold, color: Colors.textPrimary },
+  fileTypeText: { ...Typography.micro, color: Colors.textMuted },
+  orText: { ...Typography.micro, color: Colors.textMuted, textAlign: 'center', marginVertical: 6 },
 
   presetGroup: { gap: 6 },
   presetChip: { backgroundColor: Colors.lavenderBg, padding: 8, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.lavenderLight },

@@ -14,11 +14,19 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_CORE_URL": "https://fetal-care.onrender.com",
+        "EXPO_PUBLIC_AI_URL": "https://fetal-care.onrender.com"
+      },
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
+      "env": {
+        "EXPO_PUBLIC_CORE_URL": "https://fetal-care.onrender.com",
+        "EXPO_PUBLIC_AI_URL": "https://fetal-care.onrender.com"
+      },
       "android": {
         "buildType": "apk"
       }

@@ -3,8 +3,8 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 // ── API Base URLs ─────────────────────────────────────────────────────────────
-// CORE_API_URL  → Cloud-deployable CRUD backend (auth, tracker, and more)
-// AI_API_URL    → Local-only AI microservice (RAG + Ollama, port 8001)
+// Primary Production Render Backend (serves both CRUD API & RAG AI endpoints)
+const DEFAULT_PROD_URL = 'https://fetal-care.onrender.com';
 
 const getDevHostIp = (): string => {
   const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest2?.extra?.expoGo?.developer?.tool || (Constants as any).manifest?.debuggerHost || (Constants as any).experienceUrl;
@@ -14,7 +14,7 @@ const getDevHostIp = (): string => {
       return ip;
     }
   }
-  return '10.109.98.12'; // Current hotspot IP fallback
+  return '10.109.98.12';
 };
 
 const getBaseUrl = (defaultPort: number) => {
@@ -22,18 +22,10 @@ const getBaseUrl = (defaultPort: number) => {
     ? (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_CORE_URL)
     : (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_AI_URL);
 
-  if (envUrl) return envUrl;
+  if (envUrl && envUrl.trim() !== '') return envUrl.trim().replace(/\/+$/, '');
 
-  // On physical devices / Expo Go, localhost refers to the mobile phone itself.
-  // Dynamically resolve dev machine IP address from Expo hostUri.
-  if (Platform.OS !== 'web') {
-    const devIp = getDevHostIp();
-    if (devIp && devIp !== 'localhost' && devIp !== '127.0.0.1') {
-      return `http://${devIp}:${defaultPort}`;
-    }
-  }
-
-  return `http://localhost:${defaultPort}`;
+  // Default to live Render deployment
+  return DEFAULT_PROD_URL;
 };
 
 export const CORE_API_URL: string = getBaseUrl(8000);
@@ -41,24 +33,27 @@ export const AI_API_URL: string = getBaseUrl(8001);
 
 export type UserRole = 'mother' | 'partner' | 'family' | 'doctor';
 
-// Helper for fetching core backend with IP fallbacks
+// Helper for fetching core backend
 async function coreFetchRaw(path: string, options: RequestInit = {}): Promise<Response> {
   const url = `${CORE_API_URL}${path}`;
   try {
     return await fetch(url, options);
   } catch (primaryErr) {
-    const devIp = getDevHostIp();
-    if (devIp && devIp !== 'localhost') {
-      try {
-        return await fetch(`http://${devIp}:8000${path}`, options);
-      } catch (wifiErr) {}
+    // Only attempt local IP fallbacks if running on local http dev mode
+    if (!CORE_API_URL.startsWith('https://')) {
+      const devIp = getDevHostIp();
+      if (devIp && devIp !== 'localhost') {
+        try {
+          return await fetch(`http://${devIp}:8000${path}`, options);
+        } catch (wifiErr) {}
+      }
+      if (Platform.OS === 'android' && !Constants.isDevice) {
+        try {
+          return await fetch(`http://10.0.2.2:8000${path}`, options);
+        } catch (emuErr) {}
+      }
     }
-    if (Platform.OS === 'android' && !Constants.isDevice) {
-      try {
-        return await fetch(`http://10.0.2.2:8000${path}`, options);
-      } catch (emuErr) {}
-    }
-    throw new Error('Cannot reach backend server. Please verify core_backend is running on port 8000.');
+    throw new Error(`Cannot reach server at ${CORE_API_URL}. Please check network connection.`);
   }
 }
 

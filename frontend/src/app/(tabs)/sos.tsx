@@ -57,16 +57,32 @@ export default function SOSScreen() {
   sosTriggeredRef.current = sosTriggered;
 
   const isSpeechSupported = Platform.OS !== 'web' 
-    ? Boolean(ExpoSpeechRecognitionModule) 
+    ? Boolean(ExpoSpeechRecognitionModule && typeof (ExpoSpeechRecognitionModule as any).start === 'function') 
     : typeof window !== 'undefined' && (('SpeechRecognition' in window) || ('webkitSpeechRecognition' in window));
 
+  // Native Speech Event listener safe wrapper helper
+  const useSafeSpeechRecognitionEvent = (eventName: string, listener: (event: any) => void) => {
+    useEffect(() => {
+      if (Platform.OS !== 'web' && ExpoSpeechRecognitionModule && typeof (ExpoSpeechRecognitionModule as any).addListener === 'function') {
+        try {
+          const sub = (ExpoSpeechRecognitionModule as any).addListener(eventName, listener);
+          return () => {
+            try { sub?.remove?.(); } catch (e) {}
+          };
+        } catch (e) {
+          console.warn('Speech recognition listener registration error:', e);
+        }
+      }
+    }, [eventName, listener]);
+  };
+
   // Native Speech Event listeners (Mobile Android / iOS)
-  useSpeechRecognitionEvent('start', () => {
+  useSafeSpeechRecognitionEvent('start', () => {
     setIsListening(true);
   });
 
-  useSpeechRecognitionEvent('end', () => {
-    if (Platform.OS !== 'web' && voiceActiveRef.current && !sosTriggeredRef.current) {
+  useSafeSpeechRecognitionEvent('end', () => {
+    if (Platform.OS !== 'web' && voiceActiveRef.current && !sosTriggeredRef.current && ExpoSpeechRecognitionModule?.start) {
       try {
         ExpoSpeechRecognitionModule.start({
           lang: 'en-US',
@@ -88,7 +104,7 @@ export default function SOSScreen() {
     }
   });
 
-  useSpeechRecognitionEvent('result', (event) => {
+  useSafeSpeechRecognitionEvent('result', (event) => {
     const results = event.results;
     if (results && results.length > 0) {
       for (let i = 0; i < results.length; i++) {
@@ -102,14 +118,13 @@ export default function SOSScreen() {
     }
   });
 
-  useSpeechRecognitionEvent('error', (event) => {
+  useSafeSpeechRecognitionEvent('error', (event) => {
     const errType = (event?.error || '').toString().toLowerCase();
     
     if (errType === 'not-allowed' || errType === 'service-not-allowed') {
       setVoiceActive(false);
     } else if (['client', 'no-match', 'speech-timeout', 'no-speech', 'network', 'busy', 'audio'].includes(errType)) {
-      // Normal continuous audio loop lifecycle events on Android — auto-restart silently
-      if (Platform.OS !== 'web' && voiceActiveRef.current && !sosTriggeredRef.current) {
+      if (Platform.OS !== 'web' && voiceActiveRef.current && !sosTriggeredRef.current && ExpoSpeechRecognitionModule?.start) {
         try {
           ExpoSpeechRecognitionModule.start({
             interimResults: true,
@@ -119,7 +134,7 @@ export default function SOSScreen() {
         } catch (e) {}
       }
     } else if (errType.includes('language')) {
-      if (Platform.OS !== 'web' && voiceActiveRef.current && !sosTriggeredRef.current) {
+      if (Platform.OS !== 'web' && voiceActiveRef.current && !sosTriggeredRef.current && ExpoSpeechRecognitionModule?.start) {
         try {
           ExpoSpeechRecognitionModule.start({
             interimResults: true,
@@ -330,7 +345,7 @@ export default function SOSScreen() {
   // Universal Speech Recognition Loop (Native Mobile + Web)
   useEffect(() => {
     if (!isSpeechSupported || !voiceActive || sosTriggered) {
-      if (Platform.OS !== 'web') {
+      if (Platform.OS !== 'web' && ExpoSpeechRecognitionModule?.stop) {
         try {
           ExpoSpeechRecognitionModule.stop();
         } catch (e) {}
@@ -343,12 +358,12 @@ export default function SOSScreen() {
       return;
     }
 
-    if (Platform.OS !== 'web') {
+    if (Platform.OS !== 'web' && ExpoSpeechRecognitionModule?.requestPermissionsAsync) {
       // Native Android / iOS using Vosk Grammar Mode + Silero VAD (Offline, Zero API Key, Low Power)
       (async () => {
         try {
           const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-          if (result.granted) {
+          if (result?.granted) {
             try {
               // Vosk in "Grammar Mode": restricts recognition to exact SOS emergency vocabulary
               // combined with Silero VAD to only process audio when speech is detected.
@@ -361,12 +376,14 @@ export default function SOSScreen() {
               setIsListening(true);
             } catch (startErr) {
               console.warn("On-device offline mode unavailable, falling back to standard recognizer:", startErr);
-              ExpoSpeechRecognitionModule.start({
-                interimResults: true,
-                continuous: true,
-                requiresOnDeviceRecognition: false,
-              });
-              setIsListening(true);
+              if (ExpoSpeechRecognitionModule?.start) {
+                ExpoSpeechRecognitionModule.start({
+                  interimResults: true,
+                  continuous: true,
+                  requiresOnDeviceRecognition: false,
+                });
+                setIsListening(true);
+              }
             }
           } else {
             Alert.alert(
@@ -440,9 +457,11 @@ export default function SOSScreen() {
             }
           } catch (e) {}
         }
-        try {
-          ExpoSpeechRecognitionModule.stop();
-        } catch (e) {}
+        if (ExpoSpeechRecognitionModule?.stop) {
+          try {
+            ExpoSpeechRecognitionModule.stop();
+          } catch (e) {}
+        }
       } else if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();

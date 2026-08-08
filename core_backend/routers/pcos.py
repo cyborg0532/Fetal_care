@@ -118,18 +118,6 @@ def delete_medical_report(
     return {"status": "success", "message": f"Report ID {id} has been deleted."}
 
 
-# ── Phase 5 Assessment History, Trends, Preferences, and Chatbot Routes ──────────────────
-
-@router.get("/history", response_model=List[schemas.PCOSAssessmentResponse])
-def get_pcos_history(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    return db.query(models.PCOSAssessment).filter(
-        models.PCOSAssessment.user_id == current_user.id
-    ).order_by(models.PCOSAssessment.created_at.desc()).all()
-
-
 @router.get("/trends")
 def get_pcos_trends(
     current_user: models.User = Depends(get_current_user),

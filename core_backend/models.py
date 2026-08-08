@@ -18,7 +18,38 @@ class User(Base):
     emergency_profile = relationship("EmergencyProfile", back_populates="user", uselist=False)
     pcos_assessments = relationship("PCOSAssessment", back_populates="user", cascade="all, delete-orphan")
     pcos_reports = relationship("PCOSMedicalReport", back_populates="user", cascade="all, delete-orphan")
+    health_records = relationship("HealthRecord", back_populates="user", cascade="all, delete-orphan")
     pcos_preferences = Column(JSON, nullable=True)
+
+
+class HealthRecord(Base):
+    __tablename__ = "health_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    category = Column(String, default="General")  # Ultrasound, Blood Test, Clinical Note, PCOS Assessment, Prescription
+    status = Column(String, default="verified")  # verified, pending, under_review, flagged
+    role_visibility = Column(String, default="user")  # user, hospital, investigator, admin
+
+    patient_name = Column(String, nullable=True, default="Mama Patient")
+    gestational_week = Column(Integer, nullable=True, default=24)
+    risk_level = Column(String, nullable=True, default="Low Risk")
+    doctor_notes = Column(Text, nullable=True)
+    recommendations = Column(JSON, nullable=True)
+    lab_values = Column(JSON, nullable=True)
+
+    # Attachments
+    attachment_url = Column(Text, nullable=True)
+    attachment_name = Column(String, nullable=True)
+    attachment_type = Column(String, nullable=True)  # image, pdf, document
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="health_records")
+
 
 
 

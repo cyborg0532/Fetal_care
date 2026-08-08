@@ -22,9 +22,18 @@ const getBaseUrl = (defaultPort: number) => {
     ? (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_CORE_URL)
     : (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_AI_URL);
 
-  // Default to localhost so ADB reverse port forwarding (USB) works seamlessly.
-  // If localhost fails over network, the catch blocks automatically resolve getDevHostIp() for Wi-Fi / Hotspot.
-  return envUrl || `http://localhost:${defaultPort}`;
+  if (envUrl) return envUrl;
+
+  // On physical devices / Expo Go, localhost refers to the mobile phone itself.
+  // Dynamically resolve dev machine IP address from Expo hostUri.
+  if (Platform.OS !== 'web') {
+    const devIp = getDevHostIp();
+    if (devIp && devIp !== 'localhost' && devIp !== '127.0.0.1') {
+      return `http://${devIp}:${defaultPort}`;
+    }
+  }
+
+  return `http://localhost:${defaultPort}`;
 };
 
 export const CORE_API_URL: string = getBaseUrl(8000);
@@ -38,24 +47,18 @@ async function coreFetchRaw(path: string, options: RequestInit = {}): Promise<Re
   try {
     return await fetch(url, options);
   } catch (primaryErr) {
-    if (Platform.OS === 'android') {
-      const devIp = getDevHostIp();
+    const devIp = getDevHostIp();
+    if (devIp && devIp !== 'localhost') {
       try {
         return await fetch(`http://${devIp}:8000${path}`, options);
-      } catch (wifiErr) {
-        if (!Constants.isDevice) {
-          try {
-            return await fetch(`http://10.0.2.2:8000${path}`, options);
-          } catch (emuErr) {
-            throw new Error('Cannot reach backend server. Please verify core_backend is running on port 8000.');
-          }
-        } else {
-          throw new Error('Cannot reach backend server. Check your connection to port 8000.');
-        }
-      }
-    } else {
-      throw new Error('Cannot reach backend server. Please ensure core_backend is running on port 8000.');
+      } catch (wifiErr) {}
     }
+    if (Platform.OS === 'android' && !Constants.isDevice) {
+      try {
+        return await fetch(`http://10.0.2.2:8000${path}`, options);
+      } catch (emuErr) {}
+    }
+    throw new Error('Cannot reach backend server. Please verify core_backend is running on port 8000.');
   }
 }
 
@@ -288,13 +291,13 @@ export async function sendAiBuddyMessage(message: string): Promise<string> {
 /**
  * Father Portal AI — hits POST /api/v1/chat/father on local ai_service (port 8001).
  */
-// export async function sendFatherPortalMessage(message: string): Promise<string> {
-//   const data = await aiFetch('/api/v1/chat/father', {
-//     method: 'POST',
-//     body: JSON.stringify({ message }),
-//   });
-//   return data.response as string;
-// }
+export async function sendFatherPortalMessage(message: string): Promise<string> {
+  const data = await aiFetch('/api/v1/chat/father', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+  return data.response as string;
+}
 
 // ── Report Analyzer Types & Method ──────────────────────────────────────────
 
@@ -350,3 +353,61 @@ export async function analyzeMedicalReport(
     body: formData,
   });
 }
+
+// ── Health Record Types & Service ───────────────────────────────────────────
+
+export interface HealthRecordItem {
+  id: number;
+  user_id: number;
+  title: string;
+  description?: string;
+  category: string;
+  status: 'verified' | 'pending' | 'under_review' | 'flagged';
+  role_visibility: 'user' | 'hospital' | 'investigator' | 'admin';
+  patient_name?: string;
+  gestational_week?: number;
+  risk_level?: string;
+  doctor_notes?: string;
+  recommendations?: string[];
+  lab_values?: Record<string, any>;
+  attachment_url?: string;
+  attachment_name?: string;
+  attachment_type?: string;
+  created_at?: string;
+}
+
+export interface HealthRecordsResponse {
+  records: HealthRecordItem[];
+  total_count: number;
+  visible_count: number;
+  active_role: string;
+}
+
+export const HealthRecordService = {
+  async getRecords(role: string = 'user', statusFilter?: string): Promise<HealthRecordsResponse> {
+    let path = `/health-records?role=${encodeURIComponent(role)}`;
+    if (statusFilter && statusFilter !== 'all') {
+      path += `&status_filter=${encodeURIComponent(statusFilter)}`;
+    }
+    return apiFetch(path);
+  },
+
+  async createRecord(recordData: Partial<HealthRecordItem>): Promise<HealthRecordItem> {
+    return apiFetch('/health-records', {
+      method: 'POST',
+      body: JSON.stringify(recordData),
+    });
+  },
+
+  async attachEvidence(recordId: number, attachment_url: string, attachment_name?: string, attachment_type?: string): Promise<HealthRecordItem> {
+    return apiFetch(`/health-records/${recordId}/attachment`, {
+      method: 'PUT',
+      body: JSON.stringify({ attachment_url, attachment_name, attachment_type }),
+    });
+  },
+
+  getExportUrl(recordId: number, format: 'html' | 'pdf' | 'csv' = 'html'): string {
+    return `${CORE_API_URL}/health-records/${recordId}/export?format=${format}`;
+  }
+};
+

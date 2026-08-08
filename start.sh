@@ -67,9 +67,13 @@ AI_PID=$!
 
 # Port forwarding for connected Android USB devices
 if command -v adb &> /dev/null; then
-    adb reverse tcp:8000 tcp:8000 2>/dev/null
-    adb reverse tcp:8001 tcp:8001 2>/dev/null
-    adb reverse tcp:8081 tcp:8081 2>/dev/null
+    if adb devices | grep -q "device$"; then
+        echo -e "${C_SYS}[System] Connected Android device detected via USB. Setting up ADB reverse forwarding...${C_RESET}"
+        adb reverse tcp:8000 tcp:8000 2>/dev/null
+        adb reverse tcp:8001 tcp:8001 2>/dev/null
+        adb reverse tcp:8081 tcp:8081 2>/dev/null
+        export REACT_NATIVE_PACKAGER_HOSTNAME=localhost
+    fi
 fi
 
 echo -e "${C_SYS}"
@@ -80,7 +84,7 @@ echo -e "  Frontend      → http://localhost:8081  (React Native/Expo CLI - Int
 echo -e "${C_RESET}"
 
 # ── 3. Frontend Interactive CLI (Port 8081) ──────────────────────────────────
-# Runs in foreground so keys like 'r' (reload) and 'a' (open Android) work directly in terminal!
 cd frontend
+export REACT_NATIVE_PACKAGER_HOSTNAME=localhost
 npm run android
 

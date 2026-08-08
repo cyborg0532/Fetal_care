@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core_backend.database import Base, engine
-from core_backend.routers import auth, tracker, medicines, mood, sos, pcos
+from core_backend.routers import auth, tracker, medicines, mood, sos, pcos, health_records
 
 logging.basicConfig(level=logging.INFO)
 
@@ -45,6 +45,7 @@ app.include_router(medicines.router)
 app.include_router(mood.router)
 app.include_router(sos.router)
 app.include_router(pcos.router)
+app.include_router(health_records.router)
 
 
 @app.get("/")

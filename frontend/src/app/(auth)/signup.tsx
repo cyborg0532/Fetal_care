@@ -9,7 +9,7 @@ import { Colors, Spacing, Radius, Typography, Shadows } from '../../constants/th
 
 const ROLES: { label: string; value: UserRole; emoji: string }[] = [
   { label: 'Expecting Mother', value: 'mother', emoji: '🤰' },
-  //{ label: 'Partner / Father', value: 'partner', emoji: '👨' },
+  { label: 'Partner / Father', value: 'partner', emoji: '👨' },
   { label: 'Family Member', value: 'family', emoji: '👪' },
 ];
 

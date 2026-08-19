@@ -10,15 +10,23 @@ import logging
 import threading
 from pathlib import Path
 
-from watchdog.events import FileSystemEventHandler, FileSystemEvent
-from watchdog.observers import Observer
+try:
+    from watchdog.events import FileSystemEventHandler, FileSystemEvent
+    from watchdog.observers import Observer
+    WATCHDOG_AVAILABLE = True
+except ImportError:
+    FileSystemEventHandler = object
+    FileSystemEvent = object
+    Observer = None
+    WATCHDOG_AVAILABLE = False
 
 from ai_service.services.rag import DATA_DIR, delete_pdf_chunks, index_pdf, _load_manifest, _save_manifest, _md5
 
 logger = logging.getLogger(__name__)
 
-_observer: Observer | None = None
+_observer = None
 _manifest_lock = threading.Lock()
+
 
 
 class _PDFEventHandler(FileSystemEventHandler):
@@ -86,6 +94,9 @@ class _PDFEventHandler(FileSystemEventHandler):
 def start_watcher() -> None:
     """Start the Watchdog observer in a daemon thread. Call from FastAPI startup."""
     global _observer
+    if not WATCHDOG_AVAILABLE or Observer is None:
+        logger.info("[Watcher] Watchdog package not installed; live file watcher disabled.")
+        return
     if _observer is not None:
         return
     handler   = _PDFEventHandler()

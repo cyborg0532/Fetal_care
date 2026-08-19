@@ -92,9 +92,9 @@ def root():
             "mood": "/mood",
             "sos": "/sos",
             "pcos": "/pcos",
-            "health_records": "/health_records",
+            "health_records": "/health-records",
             "ai_maternal_chat": "/api/v1/chat/maternal",
             "ai_father_chat": "/api/v1/chat/father",
-            "ai_report_analysis": "/api/v1/chat/report-analysis",
+            "ai_report_analysis": "/api/v1/chat/analyze-report",
         },
     }

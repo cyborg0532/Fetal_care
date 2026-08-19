@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  # Unified Production Backend (runs Core Backend + AI Service RAG on single port)
+  maternalcare-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maternalcare_prod_api
+    ports:
+      - "10000:10000"
+    environment:
+      - PORT=10000
+      - DATABASE_URL=postgresql://neondb_owner:npg_LaN89TVvWkYt@ep-square-bird-ah9fscv3-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=gemini-2.5-flash
+      - SECRET_KEY=maternalcare-secret-key-123456789
+    restart: unless-stopped

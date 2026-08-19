@@ -86,5 +86,5 @@ echo -e "${C_RESET}"
 # ── 3. Frontend Interactive CLI (Port 8081) ──────────────────────────────────
 cd frontend
 export REACT_NATIVE_PACKAGER_HOSTNAME=localhost
-npm run android
+npm start
 

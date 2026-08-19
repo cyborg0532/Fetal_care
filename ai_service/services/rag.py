@@ -348,27 +348,58 @@ async def _generate_ollama(system_prompt: str, user_prompt: str) -> str | None:
     return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# query_rag  —  4-Tier Fallback Query Engine
-# ═══════════════════════════════════════════════════════════════════════════════
+_tfidf_vectorizer = None
+_tfidf_matrix = None
+_pdf_chunks_cache = None
+
+def _get_lightweight_rag_context(prompt: str, top_k: int = 3) -> str:
+    global _tfidf_vectorizer, _tfidf_matrix, _pdf_chunks_cache
+    chunks_path = _AI_SERVICE / "pdf_chunks.json"
+    if not chunks_path.exists():
+        chunks_path = _ROOT / "ai_service" / "pdf_chunks.json"
+
+    if chunks_path.exists():
+        try:
+            if _pdf_chunks_cache is None:
+                _pdf_chunks_cache = json.loads(chunks_path.read_text())
+                from sklearn.feature_extraction.text import TfidfVectorizer
+                _tfidf_vectorizer = TfidfVectorizer(stop_words='english')
+                texts = [c['text'] for c in _pdf_chunks_cache]
+                _tfidf_matrix = _tfidf_vectorizer.fit_transform(texts)
+
+            from sklearn.metrics.pairwise import cosine_similarity
+            query_vec = _tfidf_vectorizer.transform([prompt])
+            sims = cosine_similarity(query_vec, _tfidf_matrix).flatten()
+            top_indices = sims.argsort()[-top_k:][::-1]
+            retrieved = [
+                f"[Source: {_pdf_chunks_cache[idx]['source']}]\n{_pdf_chunks_cache[idx]['text']}"
+                for idx in top_indices if sims[idx] > 0.05
+            ]
+            if retrieved:
+                return "\n\n---\n\n".join(retrieved)
+        except Exception as exc:
+            logger.warning("[Lightweight RAG Warning] %s", exc)
+    return "No specific guidelines retrieved for this query."
+
 
 async def query_rag(prompt: str, portal_type: PortalType = "maternal") -> str:
-    context = "No specific guidelines retrieved for this query."
-    try:
-        collection = _get_collection()
-        if collection is not None:
-            query_embedding = await asyncio.to_thread(_embed, [prompt])
-            n = min(TOP_K, max(collection.count(), 1))
-            results = collection.query(
-                query_embeddings=query_embedding,
-                n_results=n,
-                include=["documents"],
-            )
-            docs = results.get("documents", [[]])[0]
-            if docs:
-                context = "\n\n---\n\n".join(docs)
-    except Exception as exc:
-        logger.warning("[RAG Retrieval Warning] %s", exc)
+    context = _get_lightweight_rag_context(prompt, top_k=3)
+    if context == "No specific guidelines retrieved for this query.":
+        try:
+            collection = _get_collection()
+            if collection is not None:
+                query_embedding = await asyncio.to_thread(_embed, [prompt])
+                n = min(TOP_K, max(collection.count(), 1))
+                results = collection.query(
+                    query_embeddings=query_embedding,
+                    n_results=n,
+                    include=["documents"],
+                )
+                docs = results.get("documents", [[]])[0]
+                if docs:
+                    context = "\n\n---\n\n".join(docs)
+        except Exception as exc:
+            logger.warning("[RAG Retrieval Warning] %s", exc)
 
     template = FATHER_SYSTEM_PROMPT if portal_type == "father" else MATERNAL_SYSTEM_PROMPT
     system = template.format(context=context)
